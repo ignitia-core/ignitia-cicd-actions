@@ -1,0 +1,55 @@
+name: "aws-push-docker-image"
+description: Builds a Docker image from a .Dockerfile and pushes it to AWS ECR
+
+inputs:
+  container-name:
+    description: The name of the Docker container
+    required: false
+    default: ${{ github.event.repository.name }}
+
+  software-version:
+    description: The tag version of the image
+    required: false
+    default: latest
+
+  aws-access-key-id:
+    description: AWS access key ID
+    required: true
+
+  aws-secret-access-key:
+    description: AWS secret access key
+    required: true
+
+  aws-region:
+    description: AWS region for ECR
+    required: false
+    default: eu-west-1
+
+  additional-path:
+    description: Path prefix if Dockerfile is not in root (e.g. `/grafana/`)
+    required: false
+    default: ""
+
+  dotnet-version:
+    description: Optional .NET version to install before build
+    required: false
+    default: "9.x"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{inputs.dotnet-version}}
+    - name: Build Docker Image
+      shell: bash
+      run: docker build -t ${{inputs.container-name}}:${{inputs.software-version}} workflow/repository/${{inputs.additional-path}}
+    - name: Push to ECR
+      id: ecr
+      uses: jwalton/gh-ecr-push@v1
+      with:
+        access-key-id: ${{ inputs.aws-access-key-id }}
+        secret-access-key: ${{ inputs.aws-secret-access-key }}
+        region: ${{inputs.aws-region}}
+        local-image: ${{inputs.container-name}}:${{inputs.software-version}}
+        image: ${{inputs.container-name}}:${{inputs.software-version}}

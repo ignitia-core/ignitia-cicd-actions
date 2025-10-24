@@ -1,0 +1,88 @@
+name: 'Dotnet Pack and Publish'
+description: 'Packs and publishes .NET NuGet packages to a specified package source'
+author: 'Ignitia'
+
+inputs:
+  package-path:
+    description: 'Path to the folder containing .csproj files to package'
+    required: true
+  package-source:
+    description: 'NuGet package source name'
+    required: true
+  package-version:
+    description: 'Version to assign to the packages'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Pack and publish NuGet packages
+      shell: bash
+      working-directory: ${{ inputs.package-path }}
+      run: |
+        set -euo pipefail
+        
+        # Enable globstar for recursive globbing
+        shopt -s globstar nullglob
+        
+        echo "Searching for packable projects in: ${{ inputs.package-path }}"
+        
+        # Track processed packages
+        PROCESSED_COUNT=0
+        SKIPPED_COUNT=0
+        
+        for csproj_file in **/*.csproj; do
+          if [ ! -f "$csproj_file" ]; then
+            continue
+          fi
+          
+          echo ""
+          echo "=========================================="
+          echo "Examining: $csproj_file"
+          echo "=========================================="
+          
+          # Check if project is packable (defaults to true if not specified)
+          IS_PACKABLE=$(xmllint --xpath "string(//IsPackable)" "$csproj_file" 2>/dev/null || echo "")
+          
+          if [ "$IS_PACKABLE" == "false" ]; then
+            echo "⏭️  Skipping (IsPackable=false)"
+            ((SKIPPED_COUNT++))
+            continue
+          fi
+          
+          echo "📦 Packing project..."
+          dotnet pack "$csproj_file" \
+            --configuration Release \
+            --output . \
+            -p:PackageVersion=${{ inputs.package-version }} \
+            --nologo
+          
+          # Derive package name from project file
+          PROJECT_NAME=$(basename "${csproj_file%.csproj}")
+          PACKAGE_FILE="${PROJECT_NAME}.${{ inputs.package-version }}.nupkg"
+          
+          if [ ! -f "$PACKAGE_FILE" ]; then
+            echo "❌ Error: Expected package file not found: $PACKAGE_FILE"
+            exit 1
+          fi
+          
+          echo "📤 Publishing: $PACKAGE_FILE"
+          dotnet nuget push "$PACKAGE_FILE" \
+            --source "${{ inputs.package-source }}" \
+            --skip-duplicate \
+            --no-symbols \
+            --nologo
+          
+          echo "✅ Successfully published: $PACKAGE_FILE"
+          ((PROCESSED_COUNT++))
+        done
+        
+        echo ""
+        echo "=========================================="
+        echo "📊 Summary"
+        echo "=========================================="
+        echo "Processed: $PROCESSED_COUNT package(s)"
+        echo "Skipped:   $SKIPPED_COUNT package(s)"
+        
+        if [ $PROCESSED_COUNT -eq 0 ]; then
+          echo "⚠️  Warning: No packages were published"
+        fi

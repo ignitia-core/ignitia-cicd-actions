@@ -1,0 +1,123 @@
+name: 'Common Replace Placeholders'
+description: 'Recursively replaces placeholders within all files in a given directory'
+author: 'Ignitia'
+
+inputs:
+  directory:
+    description: 'Root directory in which to perform replacements'
+    required: false
+    default: './'
+  
+  replacements-in:
+    description: 'Placeholder keys to search for, separated by tilde (~)'
+    required: true
+  
+  replacements-out:
+    description: 'Replacement values, separated by tilde (~), must match the order of replacements-in'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Replace placeholders in files
+      shell: bash
+      run: |
+        set -euo pipefail
+        
+        TARGET_DIR="${{ inputs.directory }}"
+        
+        # Validate directory exists
+        if [ ! -d "$TARGET_DIR" ]; then
+          echo "❌ Error: Directory does not exist: $TARGET_DIR"
+          exit 1
+        fi
+        
+        cd "$TARGET_DIR"
+        echo "Working directory: $(pwd)"
+        echo ""
+        
+        # Parse replacement arrays
+        IFS='~' read -ra SEARCH_TERMS <<< "${{ inputs.replacements-in }}"
+        IFS='~' read -ra REPLACE_TERMS <<< "${{ inputs.replacements-out }}"
+        
+        # Validate matching counts
+        if [ "${#SEARCH_TERMS[@]}" -ne "${#REPLACE_TERMS[@]}" ]; then
+          echo "❌ Error: Mismatch in replacement counts"
+          echo "   replacements-in:  ${#SEARCH_TERMS[@]} entries"
+          echo "   replacements-out: ${#REPLACE_TERMS[@]} entries"
+          exit 1
+        fi
+        
+        # Validate non-empty arrays
+        if [ "${#SEARCH_TERMS[@]}" -eq 0 ]; then
+          echo "❌ Error: No replacement terms provided"
+          exit 1
+        fi
+        
+        echo "=========================================="
+        echo "🔄 Replacement Plan"
+        echo "=========================================="
+        for index in "${!SEARCH_TERMS[@]}"; do
+          echo "$((index + 1)). '${SEARCH_TERMS[$index]}' → '${REPLACE_TERMS[$index]}'"
+        done
+        echo ""
+        
+        # Perform replacements
+        TOTAL_FILES_MODIFIED=0
+        
+        for index in "${!SEARCH_TERMS[@]}"; do
+          SEARCH_TERM="${SEARCH_TERMS[$index]}"
+          REPLACE_TERM="${REPLACE_TERMS[$index]}"
+          
+          echo "=========================================="
+          echo "Processing: '${SEARCH_TERM}' → '${REPLACE_TERM}'"
+          echo "=========================================="
+          
+          # Validate search term is not empty
+          if [ -z "$SEARCH_TERM" ]; then
+            echo "⚠️  Warning: Empty search term at position $((index + 1)), skipping"
+            continue
+          fi
+          
+          # Find files containing the search term
+          MATCHED_FILES=()
+          while IFS= read -r -d '' file; do
+            MATCHED_FILES+=("$file")
+          done < <(find . -type f -not -path '*/\.git/*' -exec grep -Il "$SEARCH_TERM" {} \; -print0 2>/dev/null || true)
+          
+          if [ "${#MATCHED_FILES[@]}" -eq 0 ]; then
+            echo "ℹ️  No files found containing: '$SEARCH_TERM'"
+            continue
+          fi
+          
+          echo "📝 Found ${#MATCHED_FILES[@]} file(s) to modify"
+          
+          # Perform replacement on each file
+          FILES_MODIFIED=0
+          for file in "${MATCHED_FILES[@]}"; do
+            # Create a safe delimiter that won't conflict
+            DELIMITER="§"
+            if grep -q "$DELIMITER" "$file" 2>/dev/null; then
+              DELIMITER="|"
+            fi
+            
+            # Perform replacement
+            if sed -i "s${DELIMITER}${SEARCH_TERM}${DELIMITER}${REPLACE_TERM}${DELIMITER}g" "$file" 2>/dev/null; then
+              echo "   ✅ $file"
+              ((FILES_MODIFIED++))
+            else
+              echo "   ⚠️  Failed to modify: $file"
+            fi
+          done
+          
+          echo "✅ Modified $FILES_MODIFIED file(s) for this replacement"
+          ((TOTAL_FILES_MODIFIED += FILES_MODIFIED))
+          echo ""
+        done
+        
+        echo "=========================================="
+        echo "📊 Summary"
+        echo "=========================================="
+        echo "Total replacements: ${#SEARCH_TERMS[@]}"
+        echo "Total files modified: $TOTAL_FILES_MODIFIED"
+        echo "✅ Placeholder replacement complete"

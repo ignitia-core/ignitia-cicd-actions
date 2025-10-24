@@ -1,0 +1,54 @@
+name: "GitVersion - Generate Semantic Version"
+description: "Uses GitVersion to generate a semantic version from the current branch, including major, minor, and patch components."
+
+outputs:
+  semantic-version:
+    description: "Full semantic version"
+    value: ${{ steps.semver.outputs.version }}
+  major:
+    description: "Major version"
+    value: ${{ steps.semver.outputs.major }}
+  minor:
+    description: "Minor version"
+    value: ${{ steps.semver.outputs.minor }}
+  patch:
+    description: "Patch version"
+    value: ${{ steps.semver.outputs.patch }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install GitVersion
+      uses: gittools/actions/gitversion/setup@v3.0.0
+      with:
+        versionSpec: "6.x"
+
+    - name: Execute GitVersion
+      id: gitversion
+      uses: gittools/actions/gitversion/execute@v3.0.0
+      with:
+        targetPath: "workflow/repository"
+        useConfigFile: true
+        configFilePath: "workflow/repository/GitVersion.yaml"
+
+    - name: Generate Semantic Version
+      id: semver
+      shell: bash
+      run: |
+        BRANCH_NAME="${{ steps.gitversion.outputs.branchName }}"
+        MAJOR="${{ steps.gitversion.outputs.major }}"
+        MINOR="${{ steps.gitversion.outputs.minor }}"
+        PATCH="${{ steps.gitversion.outputs.patch }}"
+        COMMITS="${{ steps.gitversion.outputs.commitsSinceVersionSource }}"
+        
+        # Check if branch is main/master (stable release)
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          version="${MAJOR}.${MINOR}.${PATCH}"
+        else
+          version="${MAJOR}.${MINOR}.${PATCH}-${BRANCH_NAME}.${COMMITS}"
+        fi
+        
+        echo "version=$version" >> $GITHUB_OUTPUT
+        echo "major=$MAJOR" >> $GITHUB_OUTPUT
+        echo "minor=$MINOR" >> $GITHUB_OUTPUT
+        echo "patch=$PATCH" >> $GITHUB_OUTPUT

@@ -1,0 +1,124 @@
+name: "GitHub Clean Releases"
+description: |
+  Production-grade GitHub releases and tags cleanup action based on semantic versioning.
+  
+  Features:
+  - Automatically removes prerelease versions (e.g., 1.2.3-alpha, 1.2.3-beta)
+  - Maintains configurable retention of stable releases
+  - Dry-run mode for safe testing
+  - Comprehensive error handling and retry logic
+  - Detailed logging and summary outputs
+  - Rate limit aware with automatic retries
+
+author: "Ignitia Core"
+
+branding:
+  icon: "trash-2"
+  color: "red"
+
+inputs:
+  token:
+    description: |
+      GitHub Personal Access Token with 'repo' scope.
+      Required permissions: 'repo' for deleting releases and tags.
+    required: true
+
+  semantic-version:
+    description: |
+      Current semantic version (e.g., 1.2.3 or 1.2.3-alpha).
+      Only releases <= this version will be considered for cleanup.
+      Must follow semver format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+    required: true
+
+  keep:
+    description: |
+      Number of stable (non-prerelease) releases to retain.
+      Older stable releases beyond this count will be deleted if 'clean-old-releases' is true.
+    required: false
+    default: "10"
+
+  clean-prereleases:
+    description: |
+      Whether to delete prerelease versions (e.g., 1.2.3-alpha, 1.2.3-beta.1).
+      Prereleases are identified by the presence of a dash in the version.
+    required: false
+    default: "true"
+
+  clean-old-releases:
+    description: |
+      Whether to delete stable releases beyond the 'keep' count.
+      The most recent stable releases will be retained.
+    required: false
+    default: "true"
+
+  dry-run:
+    description: |
+      Run in dry-run mode to preview what would be deleted without making changes.
+      Useful for testing configuration before actual cleanup.
+    required: false
+    default: "false"
+
+  repo:
+    description: |
+      GitHub repository in the format 'owner/repo'.
+      Defaults to the current repository if not specified.
+    required: false
+    default: ""
+
+outputs:
+  prereleases-deleted:
+    description: "Number of prerelease versions deleted"
+    value: ${{ steps.clean.outputs.prereleases-deleted }}
+
+  old-releases-deleted:
+    description: "Number of old stable releases deleted"
+    value: ${{ steps.clean.outputs.old-releases-deleted }}
+
+  tags-deleted:
+    description: "Number of Git tags deleted"
+    value: ${{ steps.clean.outputs.tags-deleted }}
+
+  total-deleted:
+    description: "Total number of releases deleted (prereleases + old releases)"
+    value: ${{ steps.clean.outputs.total-deleted }}
+
+  api-calls:
+    description: "Number of GitHub API calls made"
+    value: ${{ steps.clean.outputs.api-calls }}
+
+  errors:
+    description: "Number of errors encountered during cleanup"
+    value: ${{ steps.clean.outputs.errors }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate script exists
+      shell: bash
+      run: |
+        SCRIPT_PATH="${{ github.action_path }}/scripts/clean-releases.sh"
+        if [[ ! -f "${SCRIPT_PATH}" ]]; then
+          echo "::error::Cleanup script not found at ${SCRIPT_PATH}"
+          exit 1
+        fi
+        chmod +x "${SCRIPT_PATH}"
+
+    - name: Clean GitHub releases and tags
+      id: clean
+      shell: bash
+      env:
+        TOKEN: ${{ inputs.token }}
+        SEMVER: ${{ inputs.semantic-version }}
+        KEEP: ${{ inputs.keep }}
+        CLEAN_PRERELEASES: ${{ inputs.clean-prereleases }}
+        CLEAN_OLD_RELEASES: ${{ inputs.clean-old-releases }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        # Set repository to current if not specified
+        if [[ -z "${REPO}" ]]; then
+          export REPO="${{ github.repository }}"
+        fi
+        
+        # Execute the cleanup script
+        "${{ github.action_path }}/scripts/clean-releases.sh"
