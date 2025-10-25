@@ -83,7 +83,7 @@ runs:
           MATCHED_FILES=()
           while IFS= read -r -d '' file; do
             MATCHED_FILES+=("$file")
-          done < <(find . -type f -not -path '*/\.git/*' -exec grep -Il "$SEARCH_TERM" {} \; -print0 2>/dev/null || true)
+          done < <(find . -type f -not -path '*/\.git/*' -not -path '*/.github/*' -exec grep -Il "$SEARCH_TERM" {} \; -print0 2>/dev/null || true)
           
           if [ "${#MATCHED_FILES[@]}" -eq 0 ]; then
             echo "ℹ️  No files found containing: '$SEARCH_TERM'"
@@ -95,14 +95,9 @@ runs:
           # Perform replacement on each file
           FILES_MODIFIED=0
           for file in "${MATCHED_FILES[@]}"; do
-            # Create a safe delimiter that won't conflict
-            DELIMITER="§"
-            if grep -q "$DELIMITER" "$file" 2>/dev/null; then
-              DELIMITER="|"
-            fi
-            
-            # Perform replacement
-            if sed -i "s${DELIMITER}${SEARCH_TERM}${DELIMITER}${REPLACE_TERM}${DELIMITER}g" "$file" 2>/dev/null; then
+            # Use perl for more robust replacement that handles special characters
+            # perl -i treats the replacement as a literal string (no need to escape)
+            if perl -i -pe "s/\Q${SEARCH_TERM}\E/${REPLACE_TERM}/g" "$file" 2>/dev/null; then
               echo "   ✅ $file"
               ((FILES_MODIFIED++))
             else
