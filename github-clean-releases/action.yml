@@ -1,124 +1,120 @@
-name: "GitHub Clean Releases"
+name: "github-clean-releases"
 description: |
-  Production-grade GitHub releases and tags cleanup action based on semantic versioning.
-  
-  Features:
-  - Automatically removes prerelease versions (e.g., 1.2.3-alpha, 1.2.3-beta)
-  - Maintains configurable retention of stable releases
-  - Dry-run mode for safe testing
-  - Comprehensive error handling and retry logic
-  - Detailed logging and summary outputs
-  - Rate limit aware with automatic retries
-
-author: "Ignitia Core"
-
-branding:
-  icon: "trash-2"
-  color: "red"
+  Cleans up GitHub releases and tags based on the current semantic version.
+  Supports deleting prereleases (e.g., 1.2.3-alpha) and/or older non-prereleases.
 
 inputs:
   token:
-    description: |
-      GitHub Personal Access Token with 'repo' scope.
-      Required permissions: 'repo' for deleting releases and tags.
+    description: "GitHub Personal Access Token"
     required: true
 
   semantic-version:
-    description: |
-      Current semantic version (e.g., 1.2.3 or 1.2.3-alpha).
-      Only releases <= this version will be considered for cleanup.
-      Must follow semver format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+    description: "The current semantic version (e.g., 1.2.3)"
     required: true
 
   keep:
-    description: |
-      Number of stable (non-prerelease) releases to retain.
-      Older stable releases beyond this count will be deleted if 'clean-old-releases' is true.
+    description: "Number of full (non-prerelease) releases to retain"
     required: false
     default: "10"
 
   clean-prereleases:
-    description: |
-      Whether to delete prerelease versions (e.g., 1.2.3-alpha, 1.2.3-beta.1).
-      Prereleases are identified by the presence of a dash in the version.
+    description: "Whether to delete prerelease versions like 1.2.3-alpha"
     required: false
     default: "true"
 
   clean-old-releases:
-    description: |
-      Whether to delete stable releases beyond the 'keep' count.
-      The most recent stable releases will be retained.
+    description: "Whether to delete older full releases beyond the 'keep' count"
     required: false
     default: "true"
 
-  dry-run:
-    description: |
-      Run in dry-run mode to preview what would be deleted without making changes.
-      Useful for testing configuration before actual cleanup.
-    required: false
-    default: "false"
-
   repo:
-    description: |
-      GitHub repository in the format 'owner/repo'.
-      Defaults to the current repository if not specified.
+    description: "GitHub repository in the form owner/repo (optional)"
     required: false
     default: ""
-
-outputs:
-  prereleases-deleted:
-    description: "Number of prerelease versions deleted"
-    value: ${{ steps.clean.outputs.prereleases-deleted }}
-
-  old-releases-deleted:
-    description: "Number of old stable releases deleted"
-    value: ${{ steps.clean.outputs.old-releases-deleted }}
-
-  tags-deleted:
-    description: "Number of Git tags deleted"
-    value: ${{ steps.clean.outputs.tags-deleted }}
-
-  total-deleted:
-    description: "Total number of releases deleted (prereleases + old releases)"
-    value: ${{ steps.clean.outputs.total-deleted }}
-
-  api-calls:
-    description: "Number of GitHub API calls made"
-    value: ${{ steps.clean.outputs.api-calls }}
-
-  errors:
-    description: "Number of errors encountered during cleanup"
-    value: ${{ steps.clean.outputs.errors }}
 
 runs:
   using: "composite"
   steps:
-    - name: Validate script exists
-      shell: bash
-      run: |
-        SCRIPT_PATH="${{ github.action_path }}/scripts/clean-releases.sh"
-        if [[ ! -f "${SCRIPT_PATH}" ]]; then
-          echo "::error::Cleanup script not found at ${SCRIPT_PATH}"
-          exit 1
-        fi
-        chmod +x "${SCRIPT_PATH}"
-
     - name: Clean GitHub releases and tags
-      id: clean
       shell: bash
-      env:
-        TOKEN: ${{ inputs.token }}
-        SEMVER: ${{ inputs.semantic-version }}
-        KEEP: ${{ inputs.keep }}
-        CLEAN_PRERELEASES: ${{ inputs.clean-prereleases }}
-        CLEAN_OLD_RELEASES: ${{ inputs.clean-old-releases }}
-        DRY_RUN: ${{ inputs.dry-run }}
-        REPO: ${{ inputs.repo }}
       run: |
-        # Set repository to current if not specified
-        if [[ -z "${REPO}" ]]; then
-          export REPO="${{ github.repository }}"
+        set -e
+
+        TOKEN="${{ inputs.token }}"
+        SEMVER="${{ inputs.semantic-version }}"
+        KEEP="${{ inputs.keep }}"
+        CLEAN_PRERELEASES="${{ inputs.clean-prereleases }}"
+        CLEAN_OLD_RELEASES="${{ inputs.clean-old-releases }}"
+        REPO="${{ inputs.repo }}"
+
+        if [ -z "$REPO" ]; then
+          REPO="${{ github.repository }}"
         fi
-        
-        # Execute the cleanup script
-        "${{ github.action_path }}/scripts/clean-releases.sh"
+
+        echo "Repository: $REPO"
+        echo "Semantic version: $SEMVER"
+        echo "Keep count: $KEEP"
+        echo "Clean prereleases: $CLEAN_PRERELEASES"
+        echo "Clean old releases: $CLEAN_OLD_RELEASES"
+
+        echo "tag_name,id,is_prerelease" > releases.csv
+
+        PAGE=1
+        while true; do
+          RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/$REPO/releases?per_page=100&page=$PAGE")
+
+          if [ "$(echo "$RESPONSE" | jq '. | length')" -eq "0" ]; then
+            break
+          fi
+
+          echo "$RESPONSE" | jq -r '.[] | "\(.tag_name),\(.id),\(.prerelease)"' >> releases.csv
+          PAGE=$((PAGE + 1))
+        done
+
+        declare -A PRERELEASE_MAP
+        declare -A NON_PRERELEASE_MAP
+
+        while IFS=',' read -r TAG ID IS_PRERELEASE; do
+          if [ "$TAG" = "tag_name" ]; then continue; fi
+
+          # Strip "v" prefix if present
+          STRIPPED_TAG="${TAG#v}"
+
+          if [[ $(echo -e "$STRIPPED_TAG\n$SEMVER" | sort -V | tail -n1) == "$SEMVER" ]]; then
+            if [[ "$STRIPPED_TAG" == *"-"* ]]; then
+              PRERELEASE_MAP[$TAG]=$ID
+            else
+              NON_PRERELEASE_MAP[$TAG]=$ID
+            fi
+          fi
+        done < releases.csv
+
+        if [ "$CLEAN_PRERELEASES" == "true" ]; then
+          echo "Cleaning prereleases..."
+          for TAG in "${!PRERELEASE_MAP[@]}"; do
+            ID=${PRERELEASE_MAP[$TAG]}
+            echo "Deleting prerelease: $TAG (ID: $ID)"
+            curl -s -X DELETE -H "Authorization: token $TOKEN" \
+              "https://api.github.com/repos/$REPO/releases/$ID"
+            curl -s -X DELETE -H "Authorization: token $TOKEN" \
+              "https://api.github.com/repos/$REPO/git/refs/tags/$TAG"
+          done
+        fi
+
+        if [ "$CLEAN_OLD_RELEASES" == "true" ]; then
+          echo "Cleaning old non-prerelease releases beyond $KEEP…"
+          NON_PRERELEASE_SORTED=($(printf '%s\n' "${!NON_PRERELEASE_MAP[@]}" | sort -rV))
+
+          if [ ${#NON_PRERELEASE_SORTED[@]} -gt $KEEP ]; then
+            for ((i=KEEP; i<${#NON_PRERELEASE_SORTED[@]}; i++)); do
+              TAG=${NON_PRERELEASE_SORTED[$i]}
+              ID=${NON_PRERELEASE_MAP[$TAG]}
+              echo "Deleting old release: $TAG (ID: $ID)"
+              curl -s -X DELETE -H "Authorization: token $TOKEN" \
+                "https://api.github.com/repos/$REPO/releases/$ID"
+              curl -s -X DELETE -H "Authorization: token $TOKEN" \
+                "https://api.github.com/repos/$REPO/git/refs/tags/$TAG"
+            done
+          fi
+        fi
