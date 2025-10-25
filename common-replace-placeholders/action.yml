@@ -79,36 +79,14 @@ runs:
             continue
           fi
           
-          # Find files containing the search term
-          MATCHED_FILES=()
-          while IFS= read -r -d '' file; do
-            MATCHED_FILES+=("$file")
-          done < <(find . -type f -not -path '*/\.git/*' -not -path '*/.github/*' -exec grep -Il "$SEARCH_TERM" {} \; -print0 2>/dev/null || true)
+          # Find files containing the search term and perform replacement
+          echo "� Replacing '$SEARCH_TERM' with '$REPLACE_TERM'"
           
-          if [ "${#MATCHED_FILES[@]}" -eq 0 ]; then
-            echo "ℹ️  No files found containing: '$SEARCH_TERM'"
-            continue
-          fi
+          # Use find + xargs safely (your proven approach)
+          find . -type f -not -path '*/\.git/*' -not -path '*/.github/*' -exec grep -Il "$SEARCH_TERM" {} \; | xargs -r sed -i "s~$SEARCH_TERM~$REPLACE_TERM~g"
           
-          echo "📝 Found ${#MATCHED_FILES[@]} file(s) to modify"
-          
-          # Perform replacement on each file
-          FILES_MODIFIED=0
-          for file in "${MATCHED_FILES[@]}"; do
-            # Use perl with environment variables to avoid escaping issues
-            # This handles special characters safely
-            export SEARCH_PATTERN="$SEARCH_TERM"
-            export REPLACE_VALUE="$REPLACE_TERM"
-            
-            if perl -i -pe 's/\Q$ENV{SEARCH_PATTERN}\E/$ENV{REPLACE_VALUE}/g' "$file"; then
-              echo "   ✅ $file"
-              ((FILES_MODIFIED++))
-            else
-              echo "   ⚠️  Failed to modify: $file (exit code: $?)"
-            fi
-            
-            unset SEARCH_PATTERN REPLACE_VALUE
-          done
+          # Count how many files were modified
+          FILES_MODIFIED=$(find . -type f -not -path '*/\.git/*' -not -path '*/.github/*' -exec grep -l "$REPLACE_TERM" {} \; 2>/dev/null | wc -l)
           
           echo "✅ Modified $FILES_MODIFIED file(s) for this replacement"
           ((TOTAL_FILES_MODIFIED += FILES_MODIFIED))
