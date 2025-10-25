@@ -21,7 +21,7 @@ runs:
     - name: Install GitVersion
       uses: gittools/actions/gitversion/setup@v3.0.0
       with:
-        versionSpec: "6.x"
+        versionSpec: "5.12.0"
 
     - name: Execute GitVersion
       id: gitversion
