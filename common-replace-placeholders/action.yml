@@ -95,14 +95,19 @@ runs:
           # Perform replacement on each file
           FILES_MODIFIED=0
           for file in "${MATCHED_FILES[@]}"; do
-            # Use perl for more robust replacement that handles special characters
-            # perl -i treats the replacement as a literal string (no need to escape)
-            if perl -i -pe "s/\Q${SEARCH_TERM}\E/${REPLACE_TERM}/g" "$file" 2>/dev/null; then
+            # Use perl with environment variables to avoid escaping issues
+            # This handles special characters safely
+            export SEARCH_PATTERN="$SEARCH_TERM"
+            export REPLACE_VALUE="$REPLACE_TERM"
+            
+            if perl -i -pe 's/\Q$ENV{SEARCH_PATTERN}\E/$ENV{REPLACE_VALUE}/g' "$file"; then
               echo "   ✅ $file"
               ((FILES_MODIFIED++))
             else
-              echo "   ⚠️  Failed to modify: $file"
+              echo "   ⚠️  Failed to modify: $file (exit code: $?)"
             fi
+            
+            unset SEARCH_PATTERN REPLACE_VALUE
           done
           
           echo "✅ Modified $FILES_MODIFIED file(s) for this replacement"
