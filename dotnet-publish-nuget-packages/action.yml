@@ -19,85 +19,23 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Pack and publish NuGet packages
+    - name: Build, pack, and publish .csproj files
       shell: bash
       working-directory: ${{ inputs.package-path }}
       run: |
-        # Enable globstar for recursive globbing
-        shopt -s globstar nullglob
-        
-        echo "Searching for packable projects in: ${{ inputs.package-path }}"
-        
-        # Track processed packages
-        PROCESSED_COUNT=0
-        SKIPPED_COUNT=0
-        FAILED_COUNT=0
-        
-        for csproj_file in **/*.csproj; do
-          if [ ! -f "$csproj_file" ]; then
-            continue
+        shopt -s globstar
+        for file in **/*.csproj; do
+          IS_PACKABLE=$(xmllint --xpath "string(//IsPackable)" "$file" 2>/dev/null)
+          echo "File: $file | IsPackable: '$IS_PACKABLE'"
+          if [ "$IS_PACKABLE" != "false" ]; then
+            echo "Processing $file"
+            dotnet pack "$file" -p:PackageVersion=${{ inputs.package-version }} -c Release --output .
+            PACKAGE_NAME="$(basename "${file%.*}").${{ inputs.package-version }}.nupkg"
+            dotnet nuget push "$PACKAGE_NAME" \
+              --api-key "${{ inputs.nuget-api-key }}" \
+              --source "${{ inputs.package-source }}" \
+              --skip-duplicate
+          else
+            echo "Skipping $file as IsPackable is set to false"
           fi
-          
-          echo ""
-          echo "=========================================="
-          echo "Examining: $csproj_file"
-          echo "=========================================="
-          
-          # Check if project is packable (defaults to true if not specified)
-          IS_PACKABLE=$(xmllint --xpath "string(//IsPackable)" "$csproj_file" 2>/dev/null || echo "")
-          
-          if [ "$IS_PACKABLE" == "false" ]; then
-            echo "⏭️  Skipping (IsPackable=false)"
-            ((SKIPPED_COUNT++))
-            continue
-          fi
-          
-          echo "📦 Packing project..."
-          if ! dotnet pack "$csproj_file" \
-            --configuration Release \
-            --output . \
-            -p:PackageVersion=${{ inputs.package-version }}; then
-            echo "❌ Error: Failed to pack $csproj_file"
-            ((FAILED_COUNT++))
-            continue
-          fi
-
-          # Derive package name from project file
-          PROJECT_NAME=$(basename "${csproj_file%.csproj}")
-          PACKAGE_FILE="${PROJECT_NAME}.${{ inputs.package-version }}.nupkg"
-          
-          if [ ! -f "$PACKAGE_FILE" ]; then
-            echo "❌ Error: Expected package file not found: $PACKAGE_FILE"
-            ((FAILED_COUNT++))
-            continue
-          fi
-          
-          echo "📤 Publishing: $PACKAGE_FILE"
-          
-          # Push package - don't fail on duplicates (matches old behavior)
-          dotnet nuget push "$PACKAGE_FILE" \
-            --api-key "${{ inputs.nuget-api-key }}" \
-            --source "${{ inputs.package-source }}" \
-            --skip-duplicate || true
-          
-          # Verify if package exists in feed (more reliable than exit codes)
-          echo "✅ Successfully processed: $PACKAGE_FILE"
-          ((PROCESSED_COUNT++))
         done
-        
-        echo ""
-        echo "=========================================="
-        echo "📊 Summary"
-        echo "=========================================="
-        echo "Processed: $PROCESSED_COUNT package(s)"
-        echo "Skipped:   $SKIPPED_COUNT package(s)"
-        echo "Failed:    $FAILED_COUNT package(s)"
-        
-        if [ $FAILED_COUNT -gt 0 ]; then
-          echo "❌ Error: $FAILED_COUNT package(s) failed to process"
-          exit 1
-        fi
-        
-        if [ $PROCESSED_COUNT -eq 0 ] && [ $SKIPPED_COUNT -eq 0 ]; then
-          echo "⚠️  Warning: No packages were found or processed"
-        fi
