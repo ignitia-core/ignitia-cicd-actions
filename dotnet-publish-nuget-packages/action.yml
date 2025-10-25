@@ -54,7 +54,7 @@ runs:
             --configuration Release \
             --output . \
             -p:PackageVersion=${{ inputs.package-version }} 
-                      
+
           # Derive package name from project file
           PROJECT_NAME=$(basename "${csproj_file%.csproj}")
           PACKAGE_FILE="${PROJECT_NAME}.${{ inputs.package-version }}.nupkg"
@@ -67,9 +67,7 @@ runs:
           echo "📤 Publishing: $PACKAGE_FILE"
           dotnet nuget push "$PACKAGE_FILE" \
             --source "${{ inputs.package-source }}" \
-            --skip-duplicate \
-            --no-symbols \
-            --nologo
+            --skip-duplicate 
           
           echo "✅ Successfully published: $PACKAGE_FILE"
           ((PROCESSED_COUNT++))
