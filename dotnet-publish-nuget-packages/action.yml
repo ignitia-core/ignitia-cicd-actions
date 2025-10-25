@@ -68,13 +68,26 @@ runs:
           fi
           
           echo "📤 Publishing: $PACKAGE_FILE"
-          dotnet nuget push "$PACKAGE_FILE" \
+          
+          # Capture output and exit code separately to handle --skip-duplicate behavior
+          set +e
+          PUSH_OUTPUT=$(dotnet nuget push "$PACKAGE_FILE" \
             --api-key "${{ inputs.nuget-api-key }}" \
             --source "${{ inputs.package-source }}" \
-            --skip-duplicate 
+            --skip-duplicate 2>&1)
+          PUSH_EXIT_CODE=$?
+          set -e
           
-          echo "✅ Successfully published: $PACKAGE_FILE"
-          ((PROCESSED_COUNT++))
+          echo "$PUSH_OUTPUT"
+          
+          # Check if push was successful or skipped (both are acceptable)
+          if [ $PUSH_EXIT_CODE -eq 0 ] || echo "$PUSH_OUTPUT" | grep -qi "already exists\|duplicate"; then
+            echo "✅ Successfully published: $PACKAGE_FILE"
+            ((PROCESSED_COUNT++))
+          else
+            echo "❌ Error: Failed to publish $PACKAGE_FILE (exit code: $PUSH_EXIT_CODE)"
+            exit 1
+          fi
         done
         
         echo ""
