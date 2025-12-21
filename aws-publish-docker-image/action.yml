@@ -1,4 +1,4 @@
-name: "aws-push-docker-image"
+name: "aws-publish-docker-image"
 description: Builds a Docker image from a .Dockerfile and pushes it to AWS ECR
 
 inputs:
@@ -11,10 +11,6 @@ inputs:
     description: The tag version of the image
     required: false
     default: latest
-
-  aws-role-arn:
-    description: ARN of the IAM role to assume via OIDC
-    required: true
 
   aws-region:
     description: AWS region for ECR
@@ -38,15 +34,11 @@ runs:
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
 
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ inputs.aws-role-arn }}
-        aws-region: ${{ inputs.aws-region }}
-
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
+      with:
+        region: ${{ inputs.aws-region }}
 
     - name: Build Docker Image
       shell: bash
