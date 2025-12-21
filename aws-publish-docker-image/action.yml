@@ -12,12 +12,8 @@ inputs:
     required: false
     default: latest
 
-  aws-access-key-id:
-    description: AWS access key ID
-    required: true
-
-  aws-secret-access-key:
-    description: AWS secret access key
+  aws-role-arn:
+    description: ARN of the IAM role to assume via OIDC
     required: true
 
   aws-region:
@@ -40,16 +36,25 @@ runs:
   steps:
     - uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: ${{inputs.dotnet-version}}
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
     - name: Build Docker Image
       shell: bash
-      run: docker build -t ${{inputs.container-name}}:${{inputs.software-version}} workflow/repository/${{inputs.additional-path}}
+      run: |
+        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ inputs.container-name }}:${{ inputs.software-version }} \
+          workflow/repository/${{ inputs.additional-path }}
+
     - name: Push to ECR
-      id: ecr
-      uses: jwalton/gh-ecr-push@v1
-      with:
-        access-key-id: ${{ inputs.aws-access-key-id }}
-        secret-access-key: ${{ inputs.aws-secret-access-key }}
-        region: ${{inputs.aws-region}}
-        local-image: ${{inputs.container-name}}:${{inputs.software-version}}
-        image: ${{inputs.container-name}}:${{inputs.software-version}}
+      shell: bash
+      run: |
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ inputs.container-name }}:${{ inputs.software-version }}
