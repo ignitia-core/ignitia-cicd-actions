@@ -3,19 +3,51 @@ description: 'Bumps application version in the -environment repository'
 author: 'Ignitia'
 
 inputs:
-  application:
-    description: 'The name of the application to update'
+  env-repo-name:
+    description: 'The name of the environment repository to update'
     required: true
   version:
     description: 'The version to set'
+    required: true
+  type:
+    description: 'The type of application (ui or api)'
     required: true
 
 runs:
   using: 'composite'
   steps:
-    - name: Push to environment repo
+    - name: Checkout environment repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.env-repo-name }}
+        token: ${{ env.GH_TOKEN }}
+        path: env-repo
+    
+    - name: Update version file
       shell: bash
       run: |
-        echo "TODO: Implement environment repo update logic"
-        echo "Application: ${{ inputs.application }}"
-        echo "Version: ${{ inputs.version }}"
+        cd env-repo
+        
+        # Determine which version file to update based on type
+        if [ "${{ inputs.type }}" == "api" ]; then
+          VERSION_FILE="version-api.yaml"
+          TYPE_LABEL="API"
+        elif [ "${{ inputs.type }}" == "ui" ]; then
+          VERSION_FILE="version-ui.yaml"
+          TYPE_LABEL="UI"
+        else
+          echo "Error: type must be either 'api' or 'ui'"
+          exit 1
+        fi
+        
+        # Update the version file
+        echo "version: ${{ inputs.version }}" > $VERSION_FILE
+        
+        # Configure git
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Commit and push
+        git add $VERSION_FILE
+        git commit -m "[$TYPE_LABEL] Version bumped to ${{ inputs.version }}"
+        git push
