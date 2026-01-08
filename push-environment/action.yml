@@ -12,6 +12,9 @@ inputs:
   type:
     description: 'The type of application (ui or api)'
     required: true
+  token:
+    description: 'GitHub token with access to the environment repository'
+    required: true
 
 runs:
   using: 'composite'
@@ -20,7 +23,7 @@ runs:
       uses: actions/checkout@v4
       with:
         repository: ${{ inputs.env-repo-name }}
-        token: ${{ env.GH_TOKEN }}
+        token: ${{ inputs.token }}
         path: env-repo
     
     - name: Update version file
